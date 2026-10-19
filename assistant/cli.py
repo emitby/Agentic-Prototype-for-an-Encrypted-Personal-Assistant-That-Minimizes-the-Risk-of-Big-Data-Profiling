@@ -11,16 +11,13 @@ straight into the encrypted vault and never into the chat.
 
 import argparse
 import getpass
-import os
 from pathlib import Path
 
 import anthropic
 
 from assistant.agents import AgentError, PersonalAssistant
 from assistant.security import SecurityError
-from assistant.vault import Vault, VaultError
-
-DEFAULT_VAULT = Path(os.environ.get("ASSISTANT_VAULT", Path.home() / ".personal-assistant" / "vault.enc"))
+from assistant.vault import DEFAULT_VAULT, Vault, VaultError
 
 HELP = """Commands (secrets stay on this machine):
   /add-email <label>         store an email address under a label (e.g. personal)
@@ -38,7 +35,8 @@ Anything else is sent to the assistant, e.g. "check my passwords for breaches",
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--vault", type=Path, default=DEFAULT_VAULT)
+    parser.add_argument("--vault", type=Path, default=DEFAULT_VAULT,
+                        help="vault file; must be inside the project directory (default: data/vault.enc)")
     parser.add_argument("--init", action="store_true", help="create a new vault")
     parser.add_argument("--verbose", action="store_true", help="show agent activity")
     args = parser.parse_args()

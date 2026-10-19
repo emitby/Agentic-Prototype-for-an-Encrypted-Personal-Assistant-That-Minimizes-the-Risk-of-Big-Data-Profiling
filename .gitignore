@@ -5,3 +5,6 @@ __pycache__/
 *.enc
 *.tmp
 .env
+data/
+.pytest_tmp/
+tasks/

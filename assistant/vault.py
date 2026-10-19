@@ -11,7 +11,7 @@ File layout (JSON):
 
 import base64
 import json
-import os
+import secrets
 import threading
 from pathlib import Path
 
@@ -24,6 +24,10 @@ SCRYPT_N = 2 ** 17     # ~128 MiB, ~0.3-1 s per unlock: slows brute-force guessi
 SCRYPT_R = 8
 SCRYPT_P = 1
 MIN_PASSPHRASE = 12
+
+# The vault always lives inside the project directory; nothing is written elsewhere.
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_VAULT = PROJECT_DIR / "data" / "vault.enc"
 
 EMPTY_STORE = {
     "credentials": {},      # label -> {site, username, email_label, password, ...}
@@ -52,11 +56,19 @@ def _derive_key(passphrase, salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P):
     return Scrypt(salt=salt, length=32, n=n, r=r, p=p).derive(passphrase.encode("utf-8"))
 
 
+def _confined(path):
+    """Resolve a vault path, refusing anything outside the project directory."""
+    resolved = Path(path).resolve()
+    if not resolved.is_relative_to(PROJECT_DIR):
+        raise VaultError(f"The vault must be inside the project directory ({PROJECT_DIR}).")
+    return resolved
+
+
 class Vault:
     """An unlocked vault. Use `Vault.create` or `Vault.open`, then `vault.data` and `vault.save()`."""
 
     def __init__(self, path, key, kdf_params, data):
-        self.path = Path(path)
+        self.path = _confined(path)
         self._key = key
         self._kdf = kdf_params
         self.data = data
@@ -64,12 +76,12 @@ class Vault:
 
     @classmethod
     def create(cls, path, passphrase, scrypt_n=SCRYPT_N):
-        path = Path(path)
+        path = _confined(path)
         if path.exists():
             raise VaultError(f"A vault already exists at {path}.")
         if len(passphrase) < MIN_PASSPHRASE:
             raise VaultError(f"Use a passphrase of at least {MIN_PASSPHRASE} characters.")
-        salt = os.urandom(16)
+        salt = secrets.token_bytes(16)
         kdf = {"salt": _b64(salt), "n": scrypt_n, "r": SCRYPT_R, "p": SCRYPT_P}
         vault = cls(path, _derive_key(passphrase, salt, scrypt_n), kdf, json.loads(json.dumps(EMPTY_STORE)))
         vault.save()
@@ -77,7 +89,7 @@ class Vault:
 
     @classmethod
     def open(cls, path, passphrase):
-        path = Path(path)
+        path = _confined(path)
         try:
             envelope = json.loads(path.read_text("utf-8"))
             if envelope.get("v") != FORMAT_VERSION:
@@ -99,14 +111,14 @@ class Vault:
 
     def save(self):
         with self._lock:
-            nonce = os.urandom(12)
+            nonce = secrets.token_bytes(12)
             plaintext = json.dumps(self.data, separators=(",", ":")).encode("utf-8")
             ct = AESGCM(self._key).encrypt(nonce, plaintext, self._aad(self._kdf))
             envelope = {"v": FORMAT_VERSION, "kdf": self._kdf, "nonce": _b64(nonce), "ct": _b64(ct)}
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(envelope), "utf-8")
-            os.replace(tmp, self.path)   # atomic: a crash never leaves a half-written vault
+            tmp.replace(self.path)   # atomic: a crash never leaves a half-written vault
 
     def lock(self):
         """Drop the key and data from this object."""

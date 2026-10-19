@@ -28,6 +28,6 @@ The [threat model](docs/threat-model.md) lists these as non-goals: network-level
 ## Using this safely
 
 - Choose a long, random vault passphrase. It can't be recovered.
-- Keep the vault file (`~/.personal-assistant/vault.enc`) out of public places, even though it's encrypted.
+- Keep the vault file (`data/vault.enc` in the project folder) out of public places, even though it's encrypted. It's gitignored, so don't force-add it.
 - Clear your terminal after using `/reveal`.
 - This is a prototype. Don't make it your only password manager.

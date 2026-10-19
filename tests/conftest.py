@@ -1,3 +1,4 @@
+import secrets
 from types import SimpleNamespace as NS
 from urllib.parse import unquote
 
@@ -5,15 +6,25 @@ import httpx
 import pytest
 
 from assistant.security import HIBPClient
-from assistant.vault import Vault
+from assistant.vault import PROJECT_DIR, Vault
 
 PASSPHRASE = "correct horse battery staple"
 FAST_N = 2 ** 14   # keep scrypt quick in tests
 
+# Test files stay inside the project (gitignored) and are never deleted by the tests.
+TEST_ROOT = PROJECT_DIR / ".pytest_tmp"
+
 
 @pytest.fixture
-def vault(tmp_path):
-    return Vault.create(tmp_path / "vault.enc", PASSPHRASE, scrypt_n=FAST_N)
+def workdir():
+    d = TEST_ROOT / secrets.token_hex(8)
+    d.mkdir(parents=True)
+    return d
+
+
+@pytest.fixture
+def vault(workdir):
+    return Vault.create(workdir / "vault.enc", PASSPHRASE, scrypt_n=FAST_N)
 
 
 class FakeHIBP:

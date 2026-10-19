@@ -85,7 +85,9 @@ Tool("ask_security_agent", ..., lambda brief: self._delegate(self.security_agent
 - Key: `scrypt(passphrase, salt, n, r, p) → 32 bytes`
 - Associated data: `{"v", "kdf"}`, canonical JSON
 - Plaintext: one JSON document with the sections `credentials`, `emails`, `grocery_lists`, `supplies`, `travel`, `transcript` and `settings`
-- Saves write to `vault.tmp`, then `os.replace` it over the vault, which is atomic
+- Saves write to `vault.tmp`, then `Path.replace` it over the vault, which is atomic
+- Salt and nonces come from `secrets.token_bytes`
+- The vault path must resolve inside the project directory (default `data/vault.enc`). Anything else raises `VaultError`, so the app never writes outside its own folder.
 
 ## Supply estimation
 

@@ -1,9 +1,10 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from assistant.privacy import Redactor
-from assistant.vault import Vault, VaultError
+from assistant.vault import PROJECT_DIR, Vault, VaultError
 from conftest import FAST_N, PASSPHRASE
 
 
@@ -49,11 +50,24 @@ def test_fresh_nonce_every_save(vault):
     assert json.loads(vault.path.read_text())["nonce"] != first
 
 
-def test_short_passphrase_and_existing_vault_rejected(tmp_path, vault):
+def test_short_passphrase_and_existing_vault_rejected(workdir, vault):
     with pytest.raises(VaultError, match="at least"):
-        Vault.create(tmp_path / "other.enc", "short")
+        Vault.create(workdir / "other.enc", "short")
     with pytest.raises(VaultError, match="already exists"):
         Vault.create(vault.path, PASSPHRASE)
+
+
+@pytest.mark.parametrize("outside", [
+    PROJECT_DIR.parent / "elsewhere" / "vault.enc",
+    PROJECT_DIR / ".." / "vault.enc",
+    Path("/vault.enc"),
+])
+def test_vault_refuses_paths_outside_project(outside):
+    with pytest.raises(VaultError, match="inside the project"):
+        Vault.create(outside, PASSPHRASE, scrypt_n=FAST_N)
+    with pytest.raises(VaultError, match="inside the project"):
+        Vault.open(outside, PASSPHRASE)
+    assert not outside.resolve().exists()
 
 
 def test_redactor_replaces_known_secrets_and_masks_others(vault):

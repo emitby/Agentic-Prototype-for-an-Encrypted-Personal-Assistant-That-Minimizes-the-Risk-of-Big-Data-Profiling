@@ -46,7 +46,8 @@ Each specialist starts every task with a fresh context and gets only the tools f
 
 ### At rest: everything is encrypted
 
-- The whole store is in one file (`~/.personal-assistant/vault.enc` by default): accounts, email addresses, grocery lists, supply readings, travel preferences and the chat transcript.
+- The whole store is in one file, `data/vault.enc` inside the project: accounts, email addresses, grocery lists, supply readings, travel preferences and the chat transcript.
+- **Contained to the project directory.** The app refuses any vault path outside the project folder, never deletes files, and doesn't use `os`, environment variables or home-directory paths. See [CLAUDE.md](CLAUDE.md).
 - **AES-256-GCM** with a fresh random nonce on every save. Any change to the file is detected and rejected.
 - The key comes from your passphrase via **scrypt** (N=2¹⁷, about 128 MiB). It isn't stored anywhere, and the passphrase can't be recovered.
 - Writes are atomic, so a crash can't leave a half-written vault.
@@ -142,9 +143,9 @@ you> find flights from JFK to Lisbon May 14-21, nonstop if possible
 pytest
 ```
 
-The 22 tests make no network or API calls. They use a mock HIBP server and a scripted Claude client.
+The 25 tests make no network or API calls, and they write only inside the project, to `.pytest_tmp/`. They use a mock HIBP server and a scripted Claude client.
 
-- **Vault:** round-trip, nothing readable on disk, wrong passphrase, tamper detection, KDF parameters bound to the ciphertext, fresh nonces
+- **Vault:** round-trip, nothing readable on disk, wrong passphrase, tamper detection, KDF parameters bound to the ciphertext, fresh nonces, refusing paths outside the project
 - **Privacy:** the redactor handles stored secrets, other email addresses and card numbers. An end-to-end test checks that **no password, email, username or staged password appears in anything sent to the model**, or in the stored transcript.
 - **Security:** k-anonymity requests and padding, reuse and weakness detection, the rotation flow, email checks with and without a key
 - **Household:** list lifecycle, configured and learned usage rates, restock handling, reorder alerts, validation
@@ -169,6 +170,8 @@ docs/
 tests/                Vault, privacy, security, household and agent tests
 SECURITY.md           How to report vulnerabilities
 CONTRIBUTING.md       Ground rules for privacy-preserving changes
+CLAUDE.md             Guardrails and workflow rules for AI coding agents working on this repo
+data/vault.enc        Your encrypted vault (created on first run, gitignored)
 ```
 
 ## Model
