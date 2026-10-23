@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+##  Code Documentation
+- Always document python code extensively where appropriate
+- Docstrings on every module, class and function: what it does, its arguments and return value, errors it raises, and side effects.
+- Comments that explain the reasoning, rules, formulas and design decisions behind the code, not ones that restate obvious lines.
+
 ## Workflow Orchestration
 
 **0. Guardrails
@@ -8,6 +13,12 @@
 - Never access the operating system, windows, paths, or system configurations
 - Never delete files
 - Never allow any agent or code to modify anything outside of the current directory
+- Temporary files go only in `.cache/` inside the project, never in the session scratchpad or the system temp folder
+- Never fetch PDF or other binary URLs (WebFetch saves a copy outside the project). Use an HTML or plain-text version, or skip the source
+- Every agent prompt must begin: "Save nothing anywhere. Do not use the scratchpad. Do not fetch PDFs. Return findings as text only."
+- Run agents and long commands in the foreground. Background tasks write output files to the system temp folder
+- Never write memory files under `~/.claude`. Lessons go in `tasks/lessons.md`
+- Before any write, check that the path is inside the project folder
 
 **1. Plan Node Default**
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
