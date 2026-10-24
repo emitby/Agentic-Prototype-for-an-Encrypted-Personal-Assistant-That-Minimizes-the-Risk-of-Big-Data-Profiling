@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PY=\"$CLAUDE_PROJECT_DIR/.venv/Scripts/python.exe\"; [ -x \"$PY\" ] || PY=\"$CLAUDE_PROJECT_DIR/.venv/bin/python\"; [ -x \"$PY\" ] || { echo 'Blocked by project guard hook: the project .venv Python was not found, so the guard cannot run. Create .venv first.' >&2; exit 2; }; \"$PY\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

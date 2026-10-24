@@ -1,3 +1,4 @@
+"""Grocery-list and supply-estimate tests."""
 from datetime import date
 
 import pytest
@@ -6,14 +7,18 @@ from assistant.household import Groceries, HouseholdError, Supplies
 
 
 class Today:
+    """A controllable 'today' for supply estimates."""
     def __init__(self, d):
+        """Start at a fixed date."""
         self.d = d
 
     def __call__(self):
+        """Return the current fake date."""
         return self.d
 
 
 def test_grocery_list_lifecycle(vault):
+    """Add, update, check off, remove and clear grocery items."""
     g = Groceries(vault)
     g.add_items("Groceries", [{"name": "Eggs", "qty": "12"}, {"name": "Milk"}])
     g.add_items("groceries", [{"name": "eggs", "qty": "18"}])            # updates, no duplicate
@@ -27,6 +32,7 @@ def test_grocery_list_lifecycle(vault):
 
 
 def test_detergent_estimate_from_configured_usage(vault):
+    """Estimates use the configured rate until readings exist."""
     today = Today(date(2026, 3, 10))
     s = Supplies(vault, today=today)
     s.track("Laundry detergent", "loads", configured_daily_use=0.5, reorder_lead_days=5)
@@ -40,6 +46,7 @@ def test_detergent_estimate_from_configured_usage(vault):
 
 
 def test_detergent_learns_usage_and_ignores_restock_jumps(vault):
+    """Learned usage ignores the jump at a restock."""
     today = Today(date(2026, 4, 1))
     s = Supplies(vault, today=today)
     s.track("detergent", "fl oz", configured_daily_use=5)
@@ -54,6 +61,7 @@ def test_detergent_learns_usage_and_ignores_restock_jumps(vault):
 
 
 def test_low_supply_flags_reorder(vault):
+    """Low supply is flagged for reorder within the lead time."""
     s = Supplies(vault, today=Today(date(2026, 3, 10)))
     s.track("detergent", "loads", configured_daily_use=1, reorder_lead_days=5)
     est = s.log("detergent", "level", 3)
@@ -63,6 +71,7 @@ def test_low_supply_flags_reorder(vault):
 
 
 def test_supply_validation(vault):
+    """Bad kinds, negative amounts and future dates are rejected."""
     s = Supplies(vault, today=Today(date(2026, 3, 10)))
     with pytest.raises(HouseholdError, match="Not tracking"):
         s.log("soap", "level", 1)

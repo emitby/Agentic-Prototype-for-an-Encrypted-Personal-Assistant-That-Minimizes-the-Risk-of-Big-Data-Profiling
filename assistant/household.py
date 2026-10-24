@@ -17,10 +17,19 @@ from datetime import date, timedelta
 
 
 class HouseholdError(ValueError):
+    """A household request that can't be done; the message is safe to show the user and the model."""
     pass
 
 
 def _parse_date(value):
+    """Parse an optional ``YYYY-MM-DD`` date.
+
+    Returns:
+        A ``date``, or ``None`` for ``None``.
+
+    Raises:
+        HouseholdError: For an invalid date.
+    """
     if value is None:
         return None
     try:
@@ -30,14 +39,22 @@ def _parse_date(value):
 
 
 class Groceries:
+    """Named grocery lists stored in the vault (list name -> items with name, qty, done)."""
     def __init__(self, vault):
+        """Keep a reference to the vault; every change is saved (encrypted) immediately."""
         self.vault = vault
 
     @property
     def _lists(self):
+        """The vault's grocery-list section."""
         return self.vault.data["grocery_lists"]
 
     def _list(self, name, create=False):
+        """Return a list by name (case-insensitive), creating it if ``create``.
+
+        Raises:
+            HouseholdError: If the list doesn't exist and ``create`` is false.
+        """
         key = name.strip().lower()
         if key not in self._lists:
             if not create:
@@ -47,11 +64,24 @@ class Groceries:
         return self._lists[key]
 
     def show(self, list_name=None):
+        """Return one list (by name) or all lists."""
         if list_name:
             return {list_name.lower(): self._list(list_name)}
         return self._lists
 
     def add_items(self, list_name, items):
+        """Add items or update their quantity; creates the list if needed.
+
+        Args:
+            list_name: The list.
+            items: ``[{"name", "qty"?}]``.
+
+        Returns:
+            The list name, the items added or updated, and the whole list.
+
+        Raises:
+            HouseholdError: For an item without a name.
+        """
         lst = self._list(list_name, create=True)
         added = []
         for item in items:
@@ -69,6 +99,11 @@ class Groceries:
         return {"list": list_name.lower(), "added_or_updated": added, "items": lst}
 
     def check_off(self, list_name, item_names):
+        """Mark items as bought.
+
+        Returns:
+            ``{checked_off, not_found}``.
+        """
         lst = self._list(list_name)
         wanted = {n.lower() for n in item_names}
         hits = [i["name"] for i in lst if i["name"].lower() in wanted and not i["done"]]
@@ -80,6 +115,11 @@ class Groceries:
         return {"checked_off": hits, "not_found": missing}
 
     def remove_items(self, list_name, item_names):
+        """Remove items from a list (list entries, not files).
+
+        Returns:
+            ``{removed, items}``.
+        """
         lst = self._list(list_name)
         wanted = {n.lower() for n in item_names}
         before = len(lst)
@@ -88,6 +128,7 @@ class Groceries:
         return {"removed": before - len(lst), "items": lst}
 
     def clear_done(self, list_name):
+        """Remove the items already checked off."""
         lst = self._list(list_name)
         lst[:] = [i for i in lst if not i["done"]]
         self.vault.save()
@@ -95,15 +136,24 @@ class Groceries:
 
 
 class Supplies:
+    """Consumable supplies (e.g. laundry detergent) with readings and run-out estimates.
+
+    Args:
+        vault: The unlocked vault.
+        today: Function returning today's date (tests pass a fixed one).
+    """
     def __init__(self, vault, today=date.today):
+        """Keep the vault and the date function."""
         self.vault = vault
         self.today = today
 
     @property
     def _supplies(self):
+        """The vault's supplies section."""
         return self.vault.data["supplies"]
 
     def _supply(self, name):
+        """Return a tracked supply by name, or raise :class:`HouseholdError` listing known ones."""
         key = name.strip().lower()
         if key not in self._supplies:
             known = ", ".join(sorted(self._supplies)) or "none yet"
@@ -139,6 +189,11 @@ class Supplies:
         return self.estimate(name)
 
     def _learned_daily_use(self, readings):
+        """Average daily use learned from the drops between consecutive readings.
+
+        Intervals that end in a restock are skipped (the amount used before the restock is
+        unknown). Returns ``None`` until at least one usable interval exists.
+        """
         used, days = 0.0, 0
         for prev, cur in zip(readings, readings[1:]):
             span = (date.fromisoformat(cur["date"]) - date.fromisoformat(prev["date"])).days
@@ -151,6 +206,12 @@ class Supplies:
         return (used / days) if days else None
 
     def estimate(self, name):
+        """Estimate remaining amount, daily use, days left, run-out and reorder-by dates.
+
+        Formula: remaining = last reading - daily use x days since that reading; days left =
+        remaining / daily use; reorder by = run-out date - lead days. The model reports these
+        numbers but never computes them.
+        """
         key = name.strip().lower()
         supply = self._supply(key)
         readings = supply["readings"]
@@ -191,4 +252,5 @@ class Supplies:
         return result
 
     def estimate_all(self):
+        """Estimates for every tracked supply, by name."""
         return [self.estimate(name) for name in sorted(self._supplies)]

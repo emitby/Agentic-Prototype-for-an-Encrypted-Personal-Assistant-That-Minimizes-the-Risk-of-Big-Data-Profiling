@@ -16,6 +16,7 @@ from pathlib import Path
 import anthropic
 
 from assistant.agents import AgentError, PersonalAssistant
+from assistant.guardrails import BudgetExceeded, PrivacyLeak
 from assistant.security import SecurityError
 from assistant.vault import DEFAULT_VAULT, Vault, VaultError
 
@@ -34,6 +35,11 @@ Anything else is sent to the assistant, e.g. "check my passwords for breaches",
 
 
 def main():
+    """Parse options, unlock (or create) the vault, and run the chat loop until /quit.
+
+    Side effects:
+        Reads the passphrase with hidden input; locks the vault (drops the key) on exit.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--vault", type=Path, default=DEFAULT_VAULT,
                         help="vault file; must be inside the project directory (default: data/vault.enc)")
@@ -56,6 +62,18 @@ def main():
 
 
 def _unlock(path, init):
+    """Create a new vault (``init``) or open the existing one, asking for the passphrase.
+
+    Args:
+        path: Vault file inside the project.
+        init: Create instead of open.
+
+    Returns:
+        The unlocked :class:`~assistant.vault.Vault`.
+
+    Raises:
+        VaultError: Mismatched passphrases, a wrong passphrase, or a bad path.
+    """
     if init:
         print("Choose a passphrase. It can't be recovered, and without it the vault can't be decrypted.")
         first = getpass.getpass("New passphrase: ")
@@ -66,6 +84,12 @@ def _unlock(path, init):
 
 
 def _loop(assistant, verbose):
+    """Read lines until /quit: slash commands run locally; anything else goes to the agents.
+
+    Args:
+        assistant: The :class:`~assistant.agents.PersonalAssistant`.
+        verbose: Also print agent activity, hook events and tokens per model call.
+    """
     while True:
         try:
             text = input("you> ").strip()
@@ -88,7 +112,10 @@ def _loop(assistant, verbose):
         except anthropic.APIError as exc:
             print(f"  The AI service failed ({type(exc).__name__}). Try again.")
             continue
-        except AgentError as exc:
+        except (AgentError, BudgetExceeded) as exc:
+            print(f"  {exc}")
+            continue
+        except PrivacyLeak as exc:      # the outbound_scan hook stopped a request: nothing was sent
             print(f"  {exc}")
             continue
         if result["redactions"]:
@@ -97,10 +124,26 @@ def _loop(assistant, verbose):
             for e in result["events"]:
                 if e["type"] == "tool_call":
                     print(f"  · {e['agent']} → {e['tool']}")
+                elif e["type"] == "hook":
+                    print(f"  · hook {e['hook']}: {e['action']}")
+                elif e["type"] == "model_call":
+                    u = e["usage"]
+                    print(f"  · {e['agent']} model call: {u['input'] + u['cache_read'] + u['cache_write']:,} in"
+                          f" / {u['output']:,} out tokens")
         print(f"\nassistant> {result['reply']}\n")
 
 
 def _command(assistant, text):
+    """Run a human-only slash command. Secrets are typed here (hidden where it matters) and go
+    straight into the vault; no agent can call any of these.
+
+    Args:
+        assistant: The assistant (for its security service and vault).
+        text: The command line.
+
+    Raises:
+        SecurityError, VaultError: Shown to the user by the caller.
+    """
     sec = assistant.security
     cmd, *rest = text.split()
     label = rest[0] if rest else None
@@ -146,6 +189,7 @@ def _command(assistant, text):
 
 
 def _need(value, usage):
+    """Raise a usage error (as :class:`SecurityError`) if a required argument is missing."""
     if not value:
         raise SecurityError(f"Usage: {usage}")
 

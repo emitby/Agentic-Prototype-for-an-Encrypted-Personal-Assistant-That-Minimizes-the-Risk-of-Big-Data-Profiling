@@ -9,6 +9,7 @@ SECRETS = ("password123", "adalove", "ada@example.com")
 
 
 def make(vault, fake_hibp, *responses):
+    """A scripted assistant with one email and one GitHub login stored."""
     client = FakeClaude(*responses)
     pa = PersonalAssistant(client, vault, hibp=fake_hibp.client())
     pa.security.add_email("personal", "ada@example.com")
@@ -17,6 +18,7 @@ def make(vault, fake_hibp, *responses):
 
 
 def test_secrets_never_reach_the_model(vault, fake_hibp):
+    """A password, username and email typed into the chat never reach the model or transcript."""
     import hashlib
     fake_hibp.pwned = {hashlib.sha1(b"password123").hexdigest().upper(): 99}
     client, pa = make(
@@ -41,6 +43,7 @@ def test_secrets_never_reach_the_model(vault, fake_hibp):
 
 
 def test_specialists_get_fresh_context_and_only_their_tools(vault, fake_hibp):
+    """Specialists start fresh, get only their tools, and pause_turn is continued."""
     client = FakeClaude(by_agent={
         "Coordinator": [
             response(tool_use("c1", "ask_household_agent", brief="Add eggs to groceries"),
@@ -72,6 +75,7 @@ def test_specialists_get_fresh_context_and_only_their_tools(vault, fake_hibp):
 
 
 def test_tool_errors_are_returned_not_raised(vault, fake_hibp):
+    """A failing tool becomes an is_error result the model can act on."""
     client, pa = make(
         vault, fake_hibp,
         response(tool_use("c1", "ask_security_agent", brief="rotate twitter"), stop="tool_use"),

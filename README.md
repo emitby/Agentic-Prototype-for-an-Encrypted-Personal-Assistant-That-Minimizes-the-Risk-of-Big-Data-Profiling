@@ -8,7 +8,9 @@
 
 A multi-agent personal assistant built on Claude. It keeps every stored item encrypted and keeps your secrets out of everything sent to the AI. The design question it explores: **how much can an AI assistant do for you while sending as little as possible about you to anyone else?**
 
-→ [Threat model](docs/threat-model.md) · [Architecture](docs/architecture.md) · [Example session](docs/example-session.md) · [Security policy](SECURITY.md)
+**→ [How it works (PDF): agent workflows, the encrypted vault, guardrails, hooks, the harness and tokens per tool](docs/how-it-works.pdf)**
+
+[Threat model](docs/threat-model.md) · [Architecture](docs/architecture.md) · [Guardrails](docs/guardrails.md) · [Hooks](docs/hooks.md) · [Harness](docs/harness.md) · [Example session](docs/example-session.md) · [Security policy](SECURITY.md)
 
 > **Status: research prototype.** It's useful for exploring privacy-preserving agent design. Don't make it your only password manager.
 
@@ -73,6 +75,34 @@ Each specialist starts every task with a fresh context and gets only the tools f
 
 To reduce this further, keep chats to the task, use an Anthropic organization with zero data retention, and run breach checks only when needed.
 
+## Guardrails, hooks and harness
+
+**Guardrails.** Nine rules, each enforced in code and tested in both directions ([docs/guardrails.md](docs/guardrails.md)):
+
+| # | Guardrail | # | Guardrail |
+|---|---|---|---|
+| G1 | Input check: prompt injection is refused before any model call | G6 | Token budgets per turn and per session |
+| G2 | Tool arguments validated against each tool's JSON schema | G7 | Tool-call, web-search and result-size limits |
+| G3 | Least privilege: no agent can hold a human-only tool | G8 | Host safety: no path outside the project, no deletions, no `os` |
+| G4 | Outbound privacy: redaction, plus a final scan that refuses to send a request containing a secret | G9 | Vault integrity: AES-256-GCM, scrypt, atomic writes |
+| G5 | Secret-free tool results: a leak detector flags any tool that returns a secret | | |
+
+**Hooks** ([docs/hooks.md](docs/hooks.md)):
+- **Inside the app**, every model call and tool call passes through a hook pipeline:
+  - before a model call: the budget check and the outbound privacy scan
+  - before a tool call: the schema check, the path guard and the call limit
+  - after a tool call: the leak detector, redaction and the size cap
+- **For AI coding agents** working on this repository, a Claude Code PreToolUse hook (`.claude/hooks/guard.py`) blocks file writes outside the project folder, every file-deletion command, and changing directory to outside the project.
+
+**Harness** ([docs/harness.md](docs/harness.md)):
+- It traces every call and attributes tokens **to each tool**: the tokens spent calling it, reading its result, and (for delegations) the whole specialist run. Web searches are counted separately.
+- It runs seven scripted scenarios, judged by ten scorers, including "no secret was ever sent".
+
+```powershell
+.\run.ps1 scenarios                       # simulated: offline, free, estimated tokens
+.\run.ps1 scenarios --live --max-cost 5   # real Claude and HIBP
+```
+
 ## Why password changes aren't automatic
 
 Websites have no standard API for changing a password. Scripting each site's login page breaks on 2FA, CAPTCHAs and redesigns, can lock you out of your own accounts, and would require giving an AI agent the ability to change your credentials. So rotation is **assisted**:
@@ -100,14 +130,14 @@ git clone https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-
 cd personal-assistant
 
 python -m venv .venv
-.venv\Scripts\activate             # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements.txt
+$env:ANTHROPIC_API_KEY = "sk-ant-..."   # macOS/Linux: export ANTHROPIC_API_KEY=sk-ant-...
 
-set ANTHROPIC_API_KEY=sk-ant-...   # macOS/Linux: export ANTHROPIC_API_KEY=sk-ant-...
-
-python -m assistant.cli --init     # first time: create the vault and choose a passphrase
-python -m assistant.cli --verbose  # later: unlock and chat
+.\run.ps1 init                 # first time: create the vault and choose a passphrase
+.\run.ps1 chat --verbose       # later: unlock and chat (shows agent steps, hooks and tokens)
 ```
+
+Use the launcher (`run.ps1` on Windows, `run.sh` elsewhere). It keeps Python's cache, the Playwright browser and temporary files inside the project folder. To rebuild the PDF guide, run `pip install playwright`, then `.\run.ps1 install-browser`, then `.\run.ps1 guide`.
 
 **Your passphrase can't be recovered.** Without it, the vault can't be decrypted.
 
@@ -139,11 +169,18 @@ you> find flights from JFK to Lisbon May 14-21, nonstop if possible
 
 ## Tests
 
-```bash
-pytest
+```powershell
+.\run.ps1 test
 ```
 
-The 25 tests make no network or API calls, and they write only inside the project, to `.pytest_tmp/`. They use a mock HIBP server and a scripted Claude client.
+The 268 tests make no network or API calls, and they write only inside the project (`.pytest_tmp/`, `.cache/test-output/`). They use a mock HIBP server and a scripted Claude client. On top of the original 25, they add:
+- **Guardrails:** G1–G9, each in both directions
+- **Hooks:** schema, path guard, unknown tool, human-only tools, a leaky tool caught, the outbound scan stopping a request, budget, call limit
+- **Harness:** token attribution math, all seven scenarios passing every scorer, scorers failing on a broken scenario, scrubbed traces
+- **Claude Code hook:** writes, deletions, leaving the folder, normal commands, and the exit-code protocol
+- **CLAUDE.md scans:** no `os`, no deletion calls, a docstring everywhere, Python 3.10 f-string compatibility, path confinement
+
+The original 25 cover:
 
 - **Vault:** round-trip, nothing readable on disk, wrong passphrase, tamper detection, KDF parameters bound to the ciphertext, fresh nonces, refusing paths outside the project
 - **Privacy:** the redactor handles stored secrets, other email addresses and card numbers. An end-to-end test checks that **no password, email, username or staged password appears in anything sent to the model**, or in the stored transcript.
@@ -157,17 +194,30 @@ The 25 tests make no network or API calls, and they write only inside the projec
 assistant/
 ├── vault.py          AES-256-GCM + scrypt encrypted store
 ├── privacy.py        Outbound redactor
+├── guardrails.py     G1-G9 as plain, tested functions
+├── hooks.py          In-app hook pipeline (pre/post model and tool calls)
+├── paths.py          Path confinement and atomic writes (no os, no deletions)
 ├── security.py       HIBP client, credential store, rotation
 ├── household.py      Grocery lists, supply tracking and estimates
 ├── agents/
-│   ├── runtime.py    Agent loop (server tools, pause_turn, redaction)
+│   ├── runtime.py    Agent loop (hooks, events, server tools, pause_turn)
 │   └── team.py       Coordinator and the three specialists
+├── harness/          trace, token ledger, scenarios + scorers, simulated client, runner
+├── guide.py          Builds docs/how-it-works.pdf
 └── cli.py            Terminal interface
+.claude/
+├── settings.json     Claude Code PreToolUse hook registration
+└── hooks/guard.py    Blocks writes outside the project and file deletions
 docs/
+├── how-it-works.pdf  Illustrated guide (generated)
 ├── threat-model.md   Assets, adversaries, mitigations, residual risks
 ├── architecture.md   Layers, sequence diagram, agent loop, vault format
+├── guardrails.md     G1-G9: where each is enforced, its tests and limits
+├── hooks.md          In-app hooks and the Claude Code hook
+├── harness.md        Events, token attribution, scenarios, scorers, modes
 └── example-session.md  A real run, with every number checked
-tests/                Vault, privacy, security, household and agent tests
+tests/                Vault, privacy, security, household, agents, guardrails, hooks, harness, hook script, CLAUDE.md scans
+run.ps1, run.sh       Launchers
 SECURITY.md           How to report vulnerabilities
 CONTRIBUTING.md       Ground rules for privacy-preserving changes
 CLAUDE.md             Guardrails and workflow rules for AI coding agents working on this repo

@@ -1,3 +1,4 @@
+"""Breach checks (k-anonymity), rotation and agent-safe outputs."""
 import hashlib
 
 import pytest
@@ -7,11 +8,13 @@ from assistant.security import (AccountSecurity, SecurityError, change_password_
 
 
 def sha1(pw):
+    """Uppercase SHA-1 hex of a password (the HIBP format)."""
     return hashlib.sha1(pw.encode()).hexdigest().upper()
 
 
 @pytest.fixture
 def sec(vault, fake_hibp):
+    """An AccountSecurity service over the test vault with the mock HIBP."""
     fake_hibp.pwned = {sha1("password123"): 251682}
     s = AccountSecurity(vault, fake_hibp.client())
     s.add_email("personal", "ada@example.com")
@@ -22,6 +25,7 @@ def sec(vault, fake_hibp):
 
 
 def test_password_check_uses_k_anonymity(sec, fake_hibp):
+    """Only a 5-character hash prefix is sent, with padding requested."""
     results = {r["label"]: r for r in sec.check_password_breaches()}
     assert results["github"]["breached"] and results["github"]["should_rotate"]
     assert any("forum" in i for i in results["github"]["issues"])          # reuse detected
@@ -35,6 +39,7 @@ def test_password_check_uses_k_anonymity(sec, fake_hibp):
 
 
 def test_agent_facing_outputs_never_contain_secrets(sec):
+    """Agent-safe methods return labels, never secrets."""
     sec.start_rotation("github")
     outputs = repr([sec.list_accounts(), sec.check_password_breaches(), sec.start_rotation("bank")])
     for secret in ("password123", "Zq8!vR2#mL9$wT4p", "adalove", "ada@example.com",
@@ -43,6 +48,7 @@ def test_agent_facing_outputs_never_contain_secrets(sec):
 
 
 def test_rotation_flow(sec):
+    """Rotation stages a new password, then /rotated stores it."""
     info = sec.start_rotation("bank")
     assert info["change_password_url"] == "https://www.mybank.example/.well-known/change-password"
     new = sec.reveal("bank", pending=True)
@@ -56,6 +62,7 @@ def test_rotation_flow(sec):
 
 
 def test_email_breaches_need_key_then_work(vault, fake_hibp):
+    """Email checks need an API key, then return breaches by label."""
     fake_hibp.accounts = {"ada@example.com": [
         {"Title": "ExampleCorp", "BreachDate": "2023-01-01", "DataClasses": ["Emails", "Passwords"], "IsVerified": True}]}
     sec = AccountSecurity(vault, fake_hibp.client())
@@ -70,11 +77,13 @@ def test_email_breaches_need_key_then_work(vault, fake_hibp):
 
 
 def test_unknown_labels_give_helpful_errors(sec):
+    """Unknown labels raise errors listing the known ones."""
     with pytest.raises(SecurityError, match="Known accounts: bank, forum, github"):
         sec.start_rotation("twitter")
 
 
 def test_generated_passwords_are_strong_and_unique():
+    """Generated passwords are long, mixed and unique."""
     pws = {generate_password() for _ in range(50)}
     assert len(pws) == 50
     for pw in pws:
@@ -83,6 +92,7 @@ def test_generated_passwords_are_strong_and_unique():
 
 
 def test_change_password_url():
+    """The W3C well-known change-password URL is built from the site."""
     assert change_password_url("github.com") == "https://github.com/.well-known/change-password"
     assert change_password_url("https://accounts.example.com/x?y=1") == \
         "https://accounts.example.com/.well-known/change-password"

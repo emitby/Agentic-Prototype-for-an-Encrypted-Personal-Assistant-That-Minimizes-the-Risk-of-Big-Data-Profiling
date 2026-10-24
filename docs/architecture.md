@@ -50,12 +50,17 @@ sequenceDiagram
 
 `Agent.run(messages)`:
 
-1. Call `client.beta.messages.create` with the agent's prompt, tools (custom and server), effort, prompt caching and server-side fallbacks.
+1. Run the **pre_model hooks**: the token budget check (G6) and the **outbound scan** (G4), which refuses to send a request that still contains a stored secret. Then call `client.beta.messages.create` with the agent's prompt, tools (custom and server), effort, prompt caching and server-side fallbacks. Then run the **post_model hooks** (budget charge) and emit a `model_call` event with the usage.
 2. Append the full assistant `content` to the history. The history is never edited.
 3. `refusal` returns a safe reply. `pause_turn` (a long server-side web search) loops again to let it finish. With no tool calls, return the text.
-4. Run the custom tool calls concurrently. Arguments are checked against the handler's signature first. Domain errors become `is_error` results, and unexpected exceptions are logged and returned as generic errors.
-5. **Redact every tool result**, then append all results in one user message.
+4. Run the custom tool calls concurrently. For each call:
+   - Unknown tools are refused.
+   - The **pre_tool hooks** run: schema (G2), path guard (G8), call limit (G7). A block becomes an `is_error` result naming the reason.
+   - The handler runs. Domain errors become `is_error` results; unexpected exceptions are logged and returned as generic errors.
+5. Run the **post_tool hooks** on every result: leak detector (G5), redaction (G4), size cap (G7). Then append all results in one user message.
 6. Stop after `max_turns`.
+
+See [hooks.md](hooks.md) for the hook pipeline and [harness.md](harness.md) for the events.
 
 ## Delegation
 

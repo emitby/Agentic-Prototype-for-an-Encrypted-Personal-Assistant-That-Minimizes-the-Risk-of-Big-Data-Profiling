@@ -22,3 +22,5 @@ include = ["assistant*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "tests"]
+# No .pytest_cache; tests write only inside the project (.pytest_tmp/, .cache/test-output/).
+addopts = "-p no:cacheprovider"

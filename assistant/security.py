@@ -35,6 +35,7 @@ class SecurityError(Exception):
 
 
 def _now():
+    """The current UTC time as an ISO-8601 string (seconds)."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
@@ -58,11 +59,29 @@ def change_password_url(site):
 
 
 class HIBPClient:
+    """Minimal Have I Been Pwned client.
+
+    Args:
+        http: An ``httpx.Client`` (tests pass one with a mock transport).
+        api_key: HIBP API key, needed only for email breach checks.
+    """
     def __init__(self, http=None, api_key=None):
+        """Create the HTTP client (15 s timeout, identifying user agent) unless one is given."""
         self.http = http or httpx.Client(timeout=15, headers={"user-agent": USER_AGENT})
         self.api_key = api_key
 
     def password_seen_count(self, password):
+        """How many times a password appears in Pwned Passwords, using k-anonymity.
+
+        Only the first 5 hex characters of the SHA-1 hash are sent; the response lists every
+        suffix with that prefix (padded with fake rows), and the match is made locally.
+
+        Returns:
+            The breach count (0 if not found).
+
+        Raises:
+            httpx.HTTPError: Network or HTTP errors.
+        """
         digest = hashlib.sha1(password.encode("utf-8")).hexdigest().upper()
         prefix, suffix = digest[:5], digest[5:]
         resp = self.http.get(PWNED_RANGE_URL.format(prefix=prefix), headers={"Add-Padding": "true"})
@@ -74,6 +93,14 @@ class HIBPClient:
         return 0
 
     def breaches_for_account(self, address):
+        """Breaches that include an email address (sends the address to HIBP; needs an API key).
+
+        Returns:
+            ``[{breach, date, exposed, verified}]`` (empty if none).
+
+        Raises:
+            SecurityError: No key, a rejected key, or the rate limit.
+        """
         if not self.api_key:
             raise SecurityError("Email breach checks need a Have I Been Pwned API key. "
                                 "Add one with /set-hibp-key in the CLI.")
@@ -99,14 +126,17 @@ class AccountSecurity:
     given to an agent because they accept or return secrets."""
 
     def __init__(self, vault, hibp=None):
+        """Use the given HIBP client, or one with the API key stored in the vault."""
         self.vault = vault
         self.hibp = hibp or HIBPClient(api_key=vault.data["settings"].get("hibp_api_key"))
 
     @property
     def _creds(self):
+        """The vault's credentials section (label -> login record)."""
         return self.vault.data["credentials"]
 
     def _cred(self, label):
+        """Return one login by label, or raise :class:`SecurityError` listing the known labels."""
         if label not in self._creds:
             known = ", ".join(sorted(self._creds)) or "none yet"
             raise SecurityError(f"No account labelled {label!r}. Known accounts: {known}.")
@@ -115,6 +145,11 @@ class AccountSecurity:
     # ------------------------------------------------- HUMAN-ONLY (CLI) methods
 
     def add_credential(self, label, site, username, password, email_label=None):
+        """HUMAN-ONLY. Store a website login in the vault.
+
+        Raises:
+            SecurityError: If the linked email label doesn't exist.
+        """
         if email_label and email_label not in self.vault.data["emails"]:
             raise SecurityError(f"No email labelled {email_label!r}.")
         self._creds[label] = {"site": site, "username": username, "password": password,
@@ -124,15 +159,22 @@ class AccountSecurity:
         self.vault.save()
 
     def add_email(self, label, address):
+        """HUMAN-ONLY. Store an email address under a label."""
         self.vault.data["emails"][label] = address.strip()
         self.vault.save()
 
     def set_hibp_key(self, key):
+        """HUMAN-ONLY. Store the HIBP API key (in the vault) and use it from now on."""
         self.vault.data["settings"]["hibp_api_key"] = key
         self.hibp.api_key = key
         self.vault.save()
 
     def reveal(self, label, pending=False):
+        """HUMAN-ONLY. Return a stored password, or the staged one during a rotation.
+
+        Raises:
+            SecurityError: Unknown label or no such password.
+        """
         cred = self._cred(label)
         value = cred["pending_password"] if pending else cred["password"]
         if value is None:
@@ -152,6 +194,7 @@ class AccountSecurity:
     # --------------------------------------- agent-safe methods (labels only)
 
     def list_accounts(self):
+        """Agent-safe. Every account by label with site, email label and status; no secrets."""
         return [{
             "label": label, "site": c["site"], "email_label": c["email_label"],
             "last_rotated": c["last_rotated"], "rotation_pending": bool(c["pending_password"]),
@@ -187,6 +230,11 @@ class AccountSecurity:
         return results
 
     def check_email_breaches(self, email_label):
+        """Agent-safe. Check one stored email (by label) for breaches; the result has labels only.
+
+        Raises:
+            SecurityError: Unknown label, no API key, or HIBP unreachable.
+        """
         address = self.vault.data["emails"].get(email_label)
         if address is None:
             known = ", ".join(sorted(self.vault.data["emails"])) or "none yet"

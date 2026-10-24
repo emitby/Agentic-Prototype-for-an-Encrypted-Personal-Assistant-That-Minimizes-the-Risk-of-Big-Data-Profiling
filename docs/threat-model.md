@@ -64,6 +64,19 @@ Web pages read during flight search could contain instructions aimed at the mode
 | Specialist isolation | The Travel Agent, the one that reads the web, has no security or household tools. |
 | Typed tool errors | Invalid tool calls are returned as errors and never executed. |
 
+### 5b. Defense in depth around every model and tool call
+
+The [hook pipeline](hooks.md) applies guardrails to every agent:
+- schema validation, the path guard and call limits before each tool call
+- leak detection, redaction and size caps after it
+- the token budget and a final **outbound scan** before each model call
+
+The outbound scan refuses to send any request that still contains a stored secret. See [guardrails.md](guardrails.md).
+
+### 7. AI coding agents editing this repository
+
+An AI coding agent could write outside the project or delete files by mistake. A Claude Code PreToolUse hook (`.claude/hooks/guard.py`) blocks file writes and edits outside the folder, every deletion command, and changing directory to outside it. It matches patterns and isn't a sandbox. See [hooks.md](hooks.md).
+
 ### 6. Someone at your keyboard
 
 Out of scope while the vault is unlocked. `/reveal` prints a password to your terminal, so clear the screen afterwards. The vault is locked on exit, and the key isn't written anywhere.

@@ -1,0 +1,22 @@
+# Guardrails
+
+Prompts describe the rules so the agents usually comply on the first try, but **every guardrail is enforced in code** ([`assistant/guardrails.py`](../assistant/guardrails.py)) and tested in both directions: the bad case is blocked, and the harmless look-alike still works. Most guardrails are applied through the [hook pipeline](hooks.md), so they cover all four agents and every call.
+
+| # | Guardrail | What it does | Enforced by | Tests |
+|---|---|---|---|---|
+| G1 | Input check | Strips control characters and limits messages to 4,000 characters. Refuses prompt-injection phrasing: an override verb aimed at *your / previous / system* instructions, "the rules above", "system prompt", "you are now", "developer mode", "act as the admin". Refused messages never reach a model. | `PersonalAssistant.send` | `test_guardrails.py` (7 blocked, 4 benign), `test_hooks.py`, scenario `injection-attempt` |
+| G2 | Tool-argument schema | Validates every call against the tool's JSON schema, nested items included: types, enums, ranges, lengths, required fields, no extra fields. Problems go back to the agent as errors that name the fix. | pre-tool hook `schema` | `test_guardrails.py` (8 violation kinds), `test_hooks.py` (the handler never runs) |
+| G3 | Least privilege | Specialists get only their own tools, and the Coordinator only delegation tools. Human-only operations (`reveal`, add login, rotate, set key) exist only as CLI commands, and an `Agent` refuses to be built with one. Unknown tools are blocked. | `Agent.__init__`, `known_tool` in the runtime | `test_hooks.py`, the `least_privilege` scorer |
+| G4 | Outbound privacy | The redactor replaces stored secrets with tags and masks other emails and Luhn-valid card numbers, in the user's message, every brief and every tool result. Then `outbound_scan` checks the **whole request** (system prompt, tool definitions and history, compared as raw strings) against every stored secret. If one remains, the request isn't sent (`PrivacyLeak`). | redactor, post-tool `redact`, pre-model `outbound_scan` | `test_vault_privacy.py`, `test_hooks.py`, the `no_secrets_sent` scorer |
+| G5 | Secret-free tool results | Tools return labels only. `leak_detector` checks each raw result against the stored secrets and records any hit (a tool bug) before redaction removes it. | post-tool `leak_detector` | `test_hooks.py` (a deliberately leaky tool) |
+| G6 | Token budgets | 400,000 tokens per turn and 2,000,000 per session, shared by all agents, checked before every model call and charged after it. Each agent also has a turn limit. | pre/post-model `budget_check` / `budget_charge` | `test_guardrails.py`, `test_hooks.py` |
+| G7 | Call and size limits | At most 30 client-tool calls per agent run, 10 web searches per Travel Agent task (`max_uses`), and results cut at 20,000 characters. | pre-tool `call_limit`, post-tool `size_cap` | `test_hooks.py` |
+| G8 | Host safety | Any path-like tool argument must resolve inside the project (`..` escapes, absolute paths and `~` are refused). The vault refuses outside paths. Files are written atomically and never deleted, there's no `os` module, and caches and temp files stay in `.cache/`. AI coding agents are held to the same rule by the [Claude Code hook](hooks.md#claude-code-hooks). | pre-tool `path_guard`, `paths.py`, `.claude/hooks/guard.py` | `test_guardrails.py`, `test_hooks.py`, `test_project_guardrails.py`, `test_claude_hook.py`, scenario `outside-path` |
+| G9 | Vault integrity | AES-256-GCM detects any change to the file. The scrypt parameters are bound in as associated data. Passphrases have a minimum length, and every save uses a fresh nonce. | `vault.py` | `test_vault_privacy.py`, the `vault_encrypted_on_disk` scorer |
+
+## Known limits
+
+- **G1 catches known phrasings.** The agents' instructions and least privilege are the next lines of defense; no agent can reach a secret even if instructed to.
+- **G4 matches stored values exactly.** A secret retyped with changes, such as different capitalization, isn't recognized as that secret. Email addresses and card numbers are masked by pattern anyway.
+- **The path guard recognizes path-like strings** (drive letters, slashes, `~`, `..`). No tool reads or writes files today; the guard keeps it that way for future tools.
+- **Budgets are checked before each call.** Specialists running in parallel can overshoot by the calls already in flight.

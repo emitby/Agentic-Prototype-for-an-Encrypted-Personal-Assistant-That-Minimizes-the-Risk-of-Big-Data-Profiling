@@ -19,6 +19,8 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
+from assistant.paths import write_text
+
 FORMAT_VERSION = 1
 SCRYPT_N = 2 ** 17     # ~128 MiB, ~0.3-1 s per unlock: slows brute-force guessing
 SCRYPT_R = 8
@@ -41,18 +43,29 @@ EMPTY_STORE = {
 
 
 class VaultError(Exception):
+    """A vault problem that's safe to show the user (wrong passphrase, tampering, bad path ...)."""
     pass
 
 
 def _b64(data):
+    """Base64-encode bytes to an ASCII string (for the JSON envelope)."""
     return base64.b64encode(data).decode("ascii")
 
 
 def _unb64(text):
+    """Decode a base64 string from the envelope."""
     return base64.b64decode(text.encode("ascii"))
 
 
 def _derive_key(passphrase, salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P):
+    """Derive the 256-bit AES key from the passphrase with scrypt.
+
+    scrypt is memory-hard: N = 2^17 with r = 8 uses about 128 MiB per attempt, so guessing
+    passphrases is slow and expensive even on GPUs.
+
+    Returns:
+        32 key bytes (never stored).
+    """
     return Scrypt(salt=salt, length=32, n=n, r=r, p=p).derive(passphrase.encode("utf-8"))
 
 
@@ -68,6 +81,7 @@ class Vault:
     """An unlocked vault. Use `Vault.create` or `Vault.open`, then `vault.data` and `vault.save()`."""
 
     def __init__(self, path, key, kdf_params, data):
+        """Wrap an already-derived key and decrypted data (use :meth:`create` or :meth:`open`)."""
         self.path = _confined(path)
         self._key = key
         self._kdf = kdf_params
@@ -76,6 +90,19 @@ class Vault:
 
     @classmethod
     def create(cls, path, passphrase, scrypt_n=SCRYPT_N):
+        """Create a new, empty vault file.
+
+        Args:
+            path: Inside the project only.
+            passphrase: At least MIN_PASSPHRASE characters.
+            scrypt_n: scrypt cost (tests and harness scenarios use a lower value for speed).
+
+        Returns:
+            The unlocked vault.
+
+        Raises:
+            VaultError: Existing file, short passphrase, or a path outside the project.
+        """
         path = _confined(path)
         if path.exists():
             raise VaultError(f"A vault already exists at {path}.")
@@ -89,6 +116,15 @@ class Vault:
 
     @classmethod
     def open(cls, path, passphrase):
+        """Decrypt an existing vault.
+
+        The salt and scrypt parameters come from the file; AES-GCM verifies the tag over the
+        ciphertext and the AAD (format version + KDF parameters), so a wrong passphrase, any
+        edit to the file, or swapped KDF parameters all fail the same way.
+
+        Raises:
+            VaultError: Missing file, wrong passphrase or tampering, corrupt or unsupported file.
+        """
         path = _confined(path)
         try:
             envelope = json.loads(path.read_text("utf-8"))
@@ -110,15 +146,18 @@ class Vault:
         return cls(path, key, kdf, data)
 
     def save(self):
+        """Encrypt the whole store with a fresh 96-bit nonce and write it atomically.
+
+        Side effects:
+            Writes ``vault.enc.tmp`` then renames it over ``vault.enc`` via
+            :func:`assistant.paths.write_text` (confined to the project; nothing is deleted).
+        """
         with self._lock:
             nonce = secrets.token_bytes(12)
             plaintext = json.dumps(self.data, separators=(",", ":")).encode("utf-8")
             ct = AESGCM(self._key).encrypt(nonce, plaintext, self._aad(self._kdf))
             envelope = {"v": FORMAT_VERSION, "kdf": self._kdf, "nonce": _b64(nonce), "ct": _b64(ct)}
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(envelope), "utf-8")
-            tmp.replace(self.path)   # atomic: a crash never leaves a half-written vault
+            write_text(self.path, json.dumps(envelope))   # atomic: a crash never leaves a half-written vault
 
     def lock(self):
         """Drop the key and data from this object."""
@@ -127,5 +166,6 @@ class Vault:
 
     @staticmethod
     def _aad(kdf):
+        """Associated data bound into the GCM tag: the format version and KDF parameters."""
         # Bind the KDF parameters to the ciphertext so they can't be swapped.
         return json.dumps({"v": FORMAT_VERSION, "kdf": kdf}, sort_keys=True).encode("utf-8")
