@@ -1,18 +1,53 @@
 # Agentic Prototype for an Encrypted Personal Assistant That Minimizes the Risk of Big Data Profiling
 
+**A four-agent Claude assistant for account security, travel and household chores that keeps everything in an AES-256-GCM vault and never lets your passwords, usernames or stored emails reach the model.**
+
 [![CI](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/ci.yml/badge.svg)](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Claude](https://img.shields.io/badge/model-claude--opus--5--5-8a5a2b)
+![Tests](https://img.shields.io/badge/tests-315%20passing-success)
+![Red-team](https://img.shields.io/badge/red--team-72%2F72-success)
+![Supply cross-check](https://img.shields.io/badge/supply%20cross--check-2%2C000%20fields%2C%200%20mismatches-success)
 ![Encryption](https://img.shields.io/badge/vault-AES--256--GCM%20%2B%20scrypt-success)
+![Claude](https://img.shields.io/badge/model-claude--opus--5--5-8a5a2b)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-A multi-agent personal assistant built on Claude. It keeps every stored item encrypted and keeps your secrets out of everything sent to the AI. The design question it explores: **how much can an AI assistant do for you while sending as little as possible about you to anyone else?**
+<p align="center">
+  <img src="docs/images/session-pasted-password.png" width="100%" alt="The user types a password, username and email; the privacy filter replaces all three with tags before anything is sent, and the breach check runs on labels">
+  <img src="docs/images/privacy-layers.png" width="100%" alt="Six layers between the vault and the AI service: labels, input redaction, brief redaction, leak detector, result redaction and the outbound scan">
+</p>
 
-**→ [How it works (PDF): agent workflows, the encrypted vault, guardrails, hooks, the harness and tokens per tool](docs/how-it-works.pdf)**
+**→ [How it works (PDF): agent workflows, the encrypted vault, guardrails, hooks, the harness, tokens per tool and evals](docs/how-it-works-personal-assistant.pdf)**
 
-[Threat model](docs/threat-model.md) · [Architecture](docs/architecture.md) · [Guardrails](docs/guardrails.md) · [Hooks](docs/hooks.md) · [Harness](docs/harness.md) · [Example session](docs/example-session.md) · [Security policy](SECURITY.md)
+[Evals](docs/evals.md) · [Threat model](docs/threat-model.md) · [Architecture](docs/architecture.md) · [Guardrails](docs/guardrails.md) · [Hooks](docs/hooks.md) · [Harness](docs/harness.md) · [Example session](docs/example-session.md) · [Security policy](SECURITY.md)
 
 > **Status: research prototype.** It's useful for exploring privacy-preserving agent design. Don't make it your only password manager.
+
+## Results
+
+| Eval | Result |
+|---|---|
+| Unit tests (vault, privacy, security, household, agents, guardrails, hooks, harness, Claude Code hook, evals) | **315 / 315 passing** on Python 3.10–3.12 in CI |
+| Red-team: 53 attacks on G1–G9 and HIBP k-anonymity, plus 19 benign look-alikes | **72 / 72**, with no secret let through and no ordinary request blocked |
+| Independent supply-estimate cross-check over 400 random reading histories | **2,000 fields, 0 mismatches**, with every branch of the method exercised |
+| Ten scripted conversations through the real hooks, vault and redactor, 16 scorers each (simulated agents, mock HIBP) | **10 / 10** conversations, **16 / 16** scorers at 100%, including "no secret ever sent" |
+| Planted-defect tests: each eval must fail when its guardrail or math is broken | **all pass**, so no eval passes vacuously |
+| Live trials with the real agents and the real HIBP | Pending: the Anthropic API account is out of credits ([details](docs/evals.md#5-live-trials)) |
+
+Run it yourself with `.\run.ps1 eval` (free, offline) or `.\run.ps1 eval --live --trials 3 --max-cost 8`. Every layer is described in [docs/evals.md](docs/evals.md).
+
+## Quick start
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements.txt
+.\run.ps1 eval        # offline: red-team, cross-check and 10 conversations, no API key needed
+```
+
+To chat with it, set `ANTHROPIC_API_KEY`, then `.\run.ps1 init` once and `.\run.ps1 chat --verbose`. Details in [Setup](#setup).
+
+## What it does
+
+A multi-agent personal assistant built on Claude. It keeps every stored item encrypted and keeps your secrets out of everything sent to the AI. The design question it explores: **how much can an AI assistant do for you while sending as little as possible about you to anyone else?**
 
 | Area | What it does |
 |---|---|
@@ -24,16 +59,27 @@ A multi-agent personal assistant built on Claude. It keeps every stored item enc
 
 ```mermaid
 flowchart LR
-    U([You]) -->|chat, redacted| CO[Coordinator]
-    U -->|"/add-login, /reveal, /rotated<br/>(secrets: CLI only)"| V
-    CO -->|brief| SA[Security Agent]
-    CO -->|brief| TA[Travel Agent]
-    CO -->|brief| HA[Household Agent]
-    SA -->|labels only| SEC[AccountSecurity] --> V[(Encrypted vault)]
-    SEC -->|SHA-1 prefix only| HIBP[Have I Been Pwned]
+    U([You]) -->|chat| IN{{"Input redaction + G1<br/>secrets become tags,<br/>injection refused"}}
+    U -->|"/add-login, /reveal, /rotated<br/>terminal only (G3)"| V
+    IN --> CO[Coordinator]
+    CO -->|redacted brief| SA[Security Agent]
+    CO -->|redacted brief| TA[Travel Agent]
+    CO -->|redacted brief| HA[Household Agent]
+    SA --> PRE{{"Pre-tool hooks<br/>G2 schema · G8 path guard · G7 call limit"}}
+    HA --> PRE
+    TA --> PRE
+    PRE --> T[Tools<br/>labels only]
+    T --> V[(Encrypted vault<br/>AES-256-GCM · G9)]
+    T -->|SHA-1 prefix only| HIBP[Have I Been Pwned]
+    T --> POST{{"Post-tool hooks<br/>G5 leak detector · G4 redact · G7 size cap"}}
+    POST --> OUT{{"Before every model call<br/>G4 outbound scan · G6 budget"}}
+    OUT --> AI([Claude API])
     TA -->|web search| WEB[Web]
-    HA --> HH[Groceries · Supplies] --> V
+    classDef guard fill:#fff4d6,stroke:#b45309,color:#78350f
+    class IN,PRE,POST,OUT guard
 ```
+
+Amber hexagons are guardrails enforced in code, mostly as hooks that every agent's tool and model calls pass through.
 
 | Agent | Tools | Effort |
 |---|---|---|
@@ -96,11 +142,19 @@ To reduce this further, keep chats to the task, use an Anthropic organization wi
 
 **Harness** ([docs/harness.md](docs/harness.md)):
 - It traces every call and attributes tokens **to each tool**: the tokens spent calling it, reading its result, and (for delegations) the whole specialist run. Web searches are counted separately.
-- It runs seven scripted scenarios, judged by ten scorers, including "no secret was ever sent".
+- It runs ten scripted scenarios, judged by ten scorers, including "no secret was ever sent".
+
+**Evals** ([docs/evals.md](docs/evals.md)) add four more layers:
+- **Red-team:** 72 attacks and benign look-alikes on G1–G9 and HIBP k-anonymity.
+- **Independent supply-estimate cross-check:** run-out math re-derived over 400 random histories.
+- **Six eval scorers:** a scrubbed trace, secret-free replies, no human-only operations, prefix-only HIBP requests, a vault that re-opens intact, and supply estimates matching the independent math.
+- **Live trials:** pass rates across repeated runs with the real agents.
 
 ```powershell
 .\run.ps1 scenarios                       # simulated: offline, free, estimated tokens
 .\run.ps1 scenarios --live --max-cost 5   # real Claude and HIBP
+.\run.ps1 eval                            # evals: red-team, cross-check, 16 scorers (offline)
+.\run.ps1 eval --live --trials 3 --max-cost 8
 ```
 
 ## Why password changes aren't automatic
@@ -173,10 +227,17 @@ you> find flights from JFK to Lisbon May 14-21, nonstop if possible
 .\run.ps1 test
 ```
 
-The 268 tests make no network or API calls, and they write only inside the project (`.pytest_tmp/`, `.cache/test-output/`). They use a mock HIBP server and a scripted Claude client. On top of the original 25, they add:
+The 315 tests make no network or API calls, and they write only inside the project (`.pytest_tmp/`, `.cache/test-output/`). They use a mock HIBP server and a scripted Claude client. On top of the original 25, they add:
 - **Guardrails:** G1–G9, each in both directions
 - **Hooks:** schema, path guard, unknown tool, human-only tools, a leaky tool caught, the outbound scan stopping a request, budget, call limit
-- **Harness:** token attribution math, all seven scenarios passing every scorer, scorers failing on a broken scenario, scrubbed traces
+- **Harness:** token attribution math, all ten scenarios passing every scorer, scorers failing on a broken scenario, scrubbed traces
+- **Evals:** the red-team, the supply cross-check and every eval scorer, each tested against planted defects:
+  - a disabled redactor
+  - an emptied human-only list
+  - a supply-math bug
+  - a secret leaked into a trace
+
+  Also: results free of secrets, and clean stops on API account problems.
 - **Claude Code hook:** writes, deletions, leaving the folder, normal commands, and the exit-code protocol
 - **CLAUDE.md scans:** no `os`, no deletion calls, a docstring everywhere, Python 3.10 f-string compatibility, path confinement
 
@@ -203,20 +264,27 @@ assistant/
 │   ├── runtime.py    Agent loop (hooks, events, server tools, pause_turn)
 │   └── team.py       Coordinator and the three specialists
 ├── harness/          trace, token ledger, scenarios + scorers, simulated client, runner
-├── guide.py          Builds docs/how-it-works.pdf
+├── guide.py          Builds docs/how-it-works-personal-assistant.pdf
 └── cli.py            Terminal interface
+evals/
+├── redteam.py        72 attacks and benign look-alikes on G1-G9 and HIBP
+├── crosscheck_supplies.py  Independent re-derivation of supply estimates
+├── scorers.py        Six eval scorers for every conversation
+├── run_evals.py      Runs every layer (offline or live trials); writes evals/results/
+└── results/          Results files (secret-free), kept in git
 .claude/
 ├── settings.json     Claude Code PreToolUse hook registration
 └── hooks/guard.py    Blocks writes outside the project and file deletions
 docs/
-├── how-it-works.pdf  Illustrated guide (generated)
+├── how-it-works-personal-assistant.pdf  Illustrated guide (generated)
+├── evals.md          Every eval layer, what it proves and the latest results
 ├── threat-model.md   Assets, adversaries, mitigations, residual risks
 ├── architecture.md   Layers, sequence diagram, agent loop, vault format
 ├── guardrails.md     G1-G9: where each is enforced, its tests and limits
 ├── hooks.md          In-app hooks and the Claude Code hook
 ├── harness.md        Events, token attribution, scenarios, scorers, modes
 └── example-session.md  A real run, with every number checked
-tests/                Vault, privacy, security, household, agents, guardrails, hooks, harness, hook script, CLAUDE.md scans
+tests/                Vault, privacy, security, household, agents, guardrails, hooks, harness, hook script, evals, CLAUDE.md scans
 run.ps1, run.sh       Launchers
 SECURITY.md           How to report vulnerabilities
 CONTRIBUTING.md       Ground rules for privacy-preserving changes

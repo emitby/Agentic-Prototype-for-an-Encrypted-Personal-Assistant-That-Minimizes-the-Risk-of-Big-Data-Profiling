@@ -13,7 +13,8 @@ case "$cmd" in
   chat)            exec "$PY" -m assistant.cli "$@" ;;
   test)            exec "$PY" -m pytest -q "$@" ;;
   scenarios)       exec "$PY" -m assistant.harness.run_scenarios "$@" ;;
+  eval)            exec "$PY" -m evals.run_evals "$@" ;;
   install-browser) exec "$PY" -m playwright install chromium ;;
   guide)           exec "$PY" -m assistant.guide --from-launcher "$@" ;;
-  *) echo "usage: ./run.sh init|chat|test|scenarios|install-browser|guide" ;;
+  *) echo "usage: ./run.sh init|chat|test|scenarios|eval|install-browser|guide" ;;
 esac

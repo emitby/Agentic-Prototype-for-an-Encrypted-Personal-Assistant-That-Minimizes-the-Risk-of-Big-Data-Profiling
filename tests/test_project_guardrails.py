@@ -18,7 +18,7 @@ import pytest
 
 from assistant.paths import PROJECT_DIR, PathError, confine, is_inside
 
-SOURCES = sorted(p for d in ("assistant", "tests", ".claude/hooks") for p in (PROJECT_DIR / d).rglob("*.py"))
+SOURCES = sorted(p for d in ("assistant", "tests", ".claude/hooks", "evals") for p in (PROJECT_DIR / d).rglob("*.py"))
 IDS = [p.relative_to(PROJECT_DIR).as_posix() for p in SOURCES]
 DELETION = re.compile(r"\.(unlink|rmdir)\(|\brmtree\b|\bos\.remove\b")
 # Files that name deletion calls only as text (patterns to block, or examples in the PDF guide).
