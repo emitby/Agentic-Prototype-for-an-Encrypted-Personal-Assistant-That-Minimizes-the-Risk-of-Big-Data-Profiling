@@ -1,0 +1,25 @@
+# Offline evals on every push: free, deterministic, no API key.
+# Red-team (72 cases), independent supply cross-check (2,000 fields) and ten scripted conversations with 16 scorers each.
+# Live trials with the real agents cost money and run locally: see docs/evals.md.
+name: Evals
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Red-team, supply cross-check, scenario scorers
+        run: python -m evals.run_evals

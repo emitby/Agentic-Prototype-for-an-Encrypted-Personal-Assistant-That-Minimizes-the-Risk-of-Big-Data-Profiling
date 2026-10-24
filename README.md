@@ -3,6 +3,7 @@
 **A four-agent Claude assistant for account security, travel and household chores that keeps everything in an AES-256-GCM vault and never lets your passwords, usernames or stored emails reach the model.**
 
 [![CI](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/ci.yml/badge.svg)](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/ci.yml)
+[![Evals](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/evals.yml/badge.svg)](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/evals.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Tests](https://img.shields.io/badge/tests-320%20passing-success)
 ![Live trials](https://img.shields.io/badge/live%20trials-30%2F30-success)
