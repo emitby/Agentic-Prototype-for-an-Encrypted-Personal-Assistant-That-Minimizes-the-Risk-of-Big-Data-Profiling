@@ -227,6 +227,25 @@ def test_offline_suite_passes_and_results_hold_no_secrets():
     assert len(r["scenarios"]["conversations"]) == len(SCENARIOS)
 
 
+def test_combine_merges_parts_into_trials_with_pass_rates():
+    """Two one-trial parts become one two-trial result; a failed part makes the whole fail."""
+    from assistant.paths import write_text
+    from evals.run_evals import combine
+    good = run_all(write=False, only="groceries-detergent")
+    bad = json.loads(json.dumps(good, default=str))
+    bad["scenarios"]["conversations"][0]["passed"] = False
+    paths = []
+    for i, part in enumerate((good, good, bad)):
+        path = CACHE_DIR / "test-output" / "combine" / f"part{i}.json"
+        write_text(path, json.dumps(part, default=str))
+        paths.append(path)
+    two = combine(paths[:2], write=False)
+    assert two["ok"] and two["scenarios"]["trials"] == 2
+    assert two["scenarios"]["scenario_pass_rates"]["groceries-detergent"] == [2, 2]
+    three = combine(paths, write=False)
+    assert not three["ok"] and three["scenarios"]["scenario_pass_rates"]["groceries-detergent"] == [2, 3]
+
+
 class _NoCreditClient:
     """A client whose every call fails the way the API does when the account has no credit."""
 

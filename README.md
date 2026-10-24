@@ -4,7 +4,8 @@
 
 [![CI](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/ci.yml/badge.svg)](https://github.com/emitby/Agentic-Prototype-for-an-Encrypted-Personal-Assistant-That-Minimizes-the-Risk-of-Big-Data-Profiling/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-315%20passing-success)
+![Tests](https://img.shields.io/badge/tests-320%20passing-success)
+![Live trials](https://img.shields.io/badge/live%20trials-30%2F30-success)
 ![Red-team](https://img.shields.io/badge/red--team-72%2F72-success)
 ![Supply cross-check](https://img.shields.io/badge/supply%20cross--check-2%2C000%20fields%2C%200%20mismatches-success)
 ![Encryption](https://img.shields.io/badge/vault-AES--256--GCM%20%2B%20scrypt-success)
@@ -26,12 +27,13 @@
 
 | Eval | Result |
 |---|---|
-| Unit tests (vault, privacy, security, household, agents, guardrails, hooks, harness, Claude Code hook, evals) | **315 / 315 passing** on Python 3.10–3.12 in CI |
+| Unit tests (vault, privacy, security, household, agents, guardrails, hooks, harness, Claude Code hook, evals) | **320 / 320 passing** on Python 3.10–3.12 in CI |
 | Red-team: 53 attacks on G1–G9 and HIBP k-anonymity, plus 19 benign look-alikes | **72 / 72**, with no secret let through and no ordinary request blocked |
 | Independent supply-estimate cross-check over 400 random reading histories | **2,000 fields, 0 mismatches**, with every branch of the method exercised |
 | Ten scripted conversations through the real hooks, vault and redactor, 16 scorers each (simulated agents, mock HIBP) | **10 / 10** conversations, **16 / 16** scorers at 100%, including "no secret ever sent" |
 | Planted-defect tests: each eval must fail when its guardrail or math is broken | **all pass**, so no eval passes vacuously |
-| Live trials with the real agents and the real HIBP | Pending: the Anthropic API account is out of credits ([details](docs/evals.md#5-live-trials)) |
+| Live trials with the real agents (`claude-opus-5-5`) and the real HIBP, 3 trials × 10 conversations | **30 / 30** conversations, **16 / 16** scorers at 100%, including **no secret sent in any request**; $2.69 in total |
+| Found by the live trials | Web search's server-side filtering code, and a real-HIBP case where the agent made a better call than the script ([details](docs/evals.md#what-the-live-trials-found)) |
 
 Run it yourself with `.\run.ps1 eval` (free, offline) or `.\run.ps1 eval --live --trials 3 --max-cost 8`. Every layer is described in [docs/evals.md](docs/evals.md).
 
@@ -227,7 +229,7 @@ you> find flights from JFK to Lisbon May 14-21, nonstop if possible
 .\run.ps1 test
 ```
 
-The 315 tests make no network or API calls, and they write only inside the project (`.pytest_tmp/`, `.cache/test-output/`). They use a mock HIBP server and a scripted Claude client. On top of the original 25, they add:
+The 320 tests make no network or API calls, and they write only inside the project (`.pytest_tmp/`, `.cache/test-output/`). They use a mock HIBP server and a scripted Claude client. On top of the original 25, they add:
 - **Guardrails:** G1–G9, each in both directions
 - **Hooks:** schema, path guard, unknown tool, human-only tools, a leaky tool caught, the outbound scan stopping a request, budget, call limit
 - **Harness:** token attribution math, all ten scenarios passing every scorer, scorers failing on a broken scenario, scrubbed traces

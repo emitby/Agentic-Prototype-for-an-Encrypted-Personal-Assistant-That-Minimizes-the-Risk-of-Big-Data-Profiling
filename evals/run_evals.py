@@ -109,8 +109,11 @@ def play(scenario, client, folder, live):
                            c["seed_passwords"], SCENARIO_PASSPHRASE)}
     vault.lock()
     totals = ledger(events)["totals"]
+    # Which hooks blocked or changed something (never their content: no secrets here), so live
+    # results show how often the guardrails had to act.
+    hooks = [{"hook": e["hook"], "action": e["action"]} for e in events if e.get("type") == "hook"]
     return {"scores": scores, "passed": all(s["ok"] for s in scores.values()),
-            "cost": totals["cost"], "tokens": totals["tokens"]}
+            "cost": totals["cost"], "tokens": totals["tokens"], "guardrail_events": hooks}
 
 
 def _account_problem(exc):
@@ -162,8 +165,22 @@ def run_scenarios(mode, trials=1, max_cost=8.0, only=None):
                   flush=True)
         if stopped:
             break
-    scorer_rates, scenario_rates = {}, {}
+    return {"mode": mode, "trials": trials, "conversations": conversations, **pass_rates(conversations),
+            "cost": round(spent, 4), "stopped_early": stopped, "stop_reason": stop_reason,
+            "run_dir": str(run_dir)}
+
+
+def pass_rates(conversations):
+    """Pass rates per scorer and per scenario, and how many conversations each hook acted in.
+
+    Returns:
+        ``{"scorer_pass_rates": {name: [passed, total]}, "scenario_pass_rates": {id: [passed, total]},
+        "guardrail_firings": {hook: conversations it acted in}}``.
+    """
+    scorer_rates, scenario_rates, firings = {}, {}, {}
     for c in conversations:
+        for name in {e["hook"] for e in c.get("guardrail_events", [])}:
+            firings[name] = firings.get(name, 0) + 1
         for name, s in c["scores"].items():
             tally = scorer_rates.setdefault(name, [0, 0])
             tally[0] += s["ok"]
@@ -171,14 +188,20 @@ def run_scenarios(mode, trials=1, max_cost=8.0, only=None):
         tally = scenario_rates.setdefault(c["scenario"], [0, 0])
         tally[0] += c["passed"]
         tally[1] += 1
-    return {"mode": mode, "trials": trials, "conversations": conversations,
-            "scorer_pass_rates": scorer_rates, "scenario_pass_rates": scenario_rates,
-            "cost": round(spent, 4), "stopped_early": stopped, "stop_reason": stop_reason,
-            "run_dir": str(run_dir)}
+    return {"scorer_pass_rates": scorer_rates, "scenario_pass_rates": scenario_rates, "guardrail_firings": firings}
 
 
-def run_all(live=False, trials=1, max_cost=8.0, only=None, write=True):
+def run_all(live=False, trials=1, max_cost=8.0, only=None, write=True, part=False):
     """Run the red-team, the supply cross-check and the scenarios, then write the results.
+
+    Args:
+        live: Use the real agents and the real HIBP for the scenarios.
+        trials: Trials per scenario (live mode).
+        max_cost: Live spending cap in USD.
+        only: Optional single scenario id.
+        write: Whether to write ``evals/results/<timestamp>-<mode>.json``.
+        part: Name the file ``<timestamp>-live-part.json`` instead: one piece of a longer live
+            run, merged later by :func:`combine`.
 
     Returns:
         The results dict, with ``"ok"`` true when every layer passed.
@@ -194,7 +217,47 @@ def run_all(live=False, trials=1, max_cost=8.0, only=None, write=True):
                "supplies_crosscheck": {**supplies, "on": date.today().isoformat()}, "scenarios": scenarios}
     if write:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = confine(RESULTS_DIR / f"{stamp}-{scenarios['mode']}.json")
+        path = confine(RESULTS_DIR / f"{stamp}-{scenarios['mode']}{'-part' if part else ''}.json")
+        results["results_file"] = path.relative_to(PROJECT_DIR).as_posix()
+        write_json(path, results)
+    return results
+
+
+def combine(paths, write=True):
+    """Merge several ``*-live-part.json`` files into one live result with pass rates across all of them.
+
+    A single live trial of every conversation takes several minutes, so trials run as
+    separate commands and are joined here. Trials are renumbered in file order, costs are
+    summed, and the red-team and cross-check come from the newest part.
+
+    Args:
+        paths: Part files (relative paths start at the project root), oldest first.
+        write: Whether to write ``evals/results/<timestamp>-live.json``.
+
+    Returns:
+        A results dict shaped like :func:`run_all`'s, with ``"combined_from"`` listing the parts.
+    """
+    import json
+    from pathlib import Path
+    parts = [json.loads(confine(Path(p) if Path(p).is_absolute() else PROJECT_DIR / p).read_text(encoding="utf-8"))
+             for p in paths]
+    conversations, trial = [], 0
+    for part in parts:
+        sc = part["scenarios"]
+        for t in range(1, sc["trials"] + 1):
+            trial += 1
+            conversations += [{**c, "trial": trial} for c in sc["conversations"] if c["trial"] == t]
+    stopped = [p["scenarios"]["stop_reason"] for p in parts if p["scenarios"]["stopped_early"]]
+    scenarios = {"mode": "live", "trials": trial, "conversations": conversations, **pass_rates(conversations),
+                 "cost": round(sum(p["scenarios"]["cost"] for p in parts), 4),
+                 "stopped_early": bool(stopped), "stop_reason": "; ".join(stopped) or None,
+                 "run_dir": [p["scenarios"]["run_dir"] for p in parts]}
+    ok = (all(p["redteam"]["passed"] == p["redteam"]["total"] and p["supplies_crosscheck"]["ok"] for p in parts)
+          and all(c["passed"] for c in conversations) and not stopped)
+    results = {**parts[-1], "ran_at": datetime.now().isoformat(timespec="seconds"), "scenarios": scenarios,
+               "ok": ok, "combined_from": [str(x) for x in paths]}
+    if write:
+        path = confine(RESULTS_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-live.json")
         results["results_file"] = path.relative_to(PROJECT_DIR).as_posix()
         write_json(path, results)
     return results
@@ -207,9 +270,16 @@ def main(argv=None):
     parser.add_argument("--trials", type=int, default=3, help="live trials per scenario (default 3)")
     parser.add_argument("--max-cost", type=float, default=8.0, help="live spending cap in USD (default 8)")
     parser.add_argument("--only", choices=sorted(SCENARIOS), help="run one scenario")
+    parser.add_argument("--part", action="store_true",
+                        help="save as one part of a longer live run (<timestamp>-live-part.json)")
+    parser.add_argument("--combine", nargs="+", metavar="PART",
+                        help="merge live part files into one <timestamp>-live.json and report it")
     args = parser.parse_args(argv)
-    print("Scenarios (" + (f"LIVE, {args.trials} trial(s)" if args.live else "simulated") + "):")
-    r = run_all(args.live, args.trials, args.max_cost, args.only)
+    if args.combine:
+        r = combine(args.combine)
+    else:
+        print("Scenarios (" + (f"LIVE, {args.trials} trial(s)" if args.live else "simulated") + "):")
+        r = run_all(args.live, args.trials, args.max_cost, args.only, part=args.part)
     rt, sx, sc = r["redteam"], r["supplies_crosscheck"], r["scenarios"]
     print(f"\nRed-team: {rt['passed']}/{rt['total']}  "
           + "  ".join(f"{g} {p}/{t}" for g, (p, t) in rt["by_guardrail"].items()))
@@ -222,6 +292,9 @@ def main(argv=None):
         print(f"  {name:<26} {p}/{t}")
     passed = sum(p for p, _ in sc["scenario_pass_rates"].values())
     total = sum(t for _, t in sc["scenario_pass_rates"].values())
+    if sc.get("guardrail_firings"):
+        print("Hooks that acted (conversations): "
+              + ", ".join(f"{g} {n}" for g, n in sorted(sc["guardrail_firings"].items())))
     cost_label = "cost" if sc["mode"] == "live" else "estimated cost (simulated)"
     print(f"Conversations passed: {passed}/{total}   {cost_label} ${sc['cost']:.2f}"
           + (f"   STOPPED EARLY: {sc['stop_reason']}" if sc["stopped_early"] else ""))
