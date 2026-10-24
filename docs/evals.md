@@ -123,6 +123,14 @@ In simulated mode the agents follow a script and HIBP is a mock, but every hook,
 
 **Status (2026-10-24):** not yet run. The Anthropic account behind this machine's API key is out of credits; the banquet project's live trial was cut short the same day. Live pass rates will be reported here once trials have run.
 
+## What the evals found
+
+- **A cross-platform hole in the path guard (G8), now fixed.**
+  - **What happened:** the red-team case `C:\Windows\System32` passed on Windows but failed on the first Linux CI run. On Linux and macOS, `Path("C:\Windows\System32")` isn't a drive path. It reads as a relative file *name*, which "resolves" inside the project, so the guard let it through.
+  - **The fix:** `guardrails._foreign_drive` treats any drive-letter path as outside when the project itself has no drive letter. Regression cases are in `tests/test_guardrails.py`.
+  - **Why it matters:** the original unit tests never included a drive path. The red-team did, and running it on a second operating system exposed the gap.
+- **A gap in the cross-check's own spec.** Five mismatches showed the independent supply estimate leaving "remaining" empty when a supply has one reading and no configured rate. The app reports the last reading there, which is the sensible answer, so the documented method was extended to say so. This one was a gap in the spec, not a bug in the app.
+
 ## Limits
 
 - **G1 matches known phrasings.** The agents' instructions are the second line of defense.

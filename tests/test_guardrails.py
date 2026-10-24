@@ -75,7 +75,9 @@ def test_find_secrets():
 
 
 @pytest.mark.parametrize("value", ["../../Documents/x.txt", "../outside", "\\\\server\\share\\x.txt",
-                                   {"path": "/etc/passwd"}, ["ok", "~/notes.txt"]])
+                                   {"path": "/etc/passwd"}, ["ok", "~/notes.txt"],
+                                   # Regression: on Linux these once resolved as file *names* inside the project.
+                                   "C:\\Windows\\System32", "D:/data/export.csv"])
 def test_outside_paths_are_found(value):
     """G8: path-like arguments that point outside the project are reported."""
     assert g.outside_paths(value)

@@ -26,8 +26,9 @@ depends on a model obeying. Each rule is code with its own tests
 import re
 import threading
 from dataclasses import dataclass
+from pathlib import PureWindowsPath
 
-from assistant.paths import is_inside
+from assistant.paths import PROJECT_DIR, is_inside
 
 # --------------------------------------------------------------------------- G1 input
 
@@ -234,6 +235,21 @@ WEB_SEARCH_MAX_USES = 10
 # (/etc/passwd), or contains a ../ or ..\ segment anywhere. Plain values pass: "groceries",
 # "JFK", "github.com", "~2 lbs", "1/2 cup", a brief starting "/add-login now".
 _PATHLIKE_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|~[\\/]|\.{1,2}[\\/]|/[^\s/]+/)|(?:^|[\\/])\.\.(?:[\\/]|$)")
+_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+#: The project's drive letter ("C:" on Windows, "" elsewhere). Read from the project path
+#: itself, so no operating-system query is needed.
+_PROJECT_DRIVE = PureWindowsPath(str(PROJECT_DIR)).drive
+
+
+def _foreign_drive(text):
+    """True for a Windows drive path (``C:\\...``) that can't be inside the project.
+
+    On Linux and macOS the project has no drive letter, so a drive path is never inside
+    it. Without this check, ``Path("C:\\Windows")`` there reads as a relative file *name*
+    and would resolve inside the project. (Found by the red-team on Linux CI.) On Windows,
+    :func:`~assistant.paths.is_inside` decides as usual.
+    """
+    return bool(_DRIVE_RE.match(text)) and not _PROJECT_DRIVE
 
 
 def outside_paths(value):
@@ -253,7 +269,8 @@ def outside_paths(value):
         text = value.strip()
         # "~/" means the home folder; it is never treated as inside (resolving it would mean
         # reading system settings). UNC shares (\\server\share) are always outside.
-        if _PATHLIKE_RE.search(text) and (text.startswith(("~", "\\\\")) or not is_inside(text)):
+        if _PATHLIKE_RE.search(text) and (text.startswith(("~", "\\\\")) or _foreign_drive(text)
+                                          or not is_inside(text)):
             found.append(value)
     elif isinstance(value, dict):
         for v in value.values():
